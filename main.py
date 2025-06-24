@@ -1,364 +1,363 @@
 import RPi.GPIO as GPIO
 import time
+import subprocess
 import cv2
 from picamera2 import Picamera2
-from libcamera import Transform
-import subprocess
-import threading
-import queue
-import re
+from ultralytics import YOLO
 
 
-# Disable GPIO warnings for cleaner output
+# Disable GPIO warnings
 GPIO.setwarnings(False)
 
 
-# =================================================================
-# VOICE CONFIGURATION FOR CRYSTAL CLEAR PRONUNCIATION
-# =================================================================
+# GPIO Pin Setup - BUTTON ONLY FOR OBJECT DETECTION/CAMERA
+TRIG = 23          # Ultrasonic trigger pin
+ECHO = 24          # Ultrasonic echo pin
+LED = 17           # Status LED indicator
+VIBRATION1 = 22    # Left vibration motor
+VIBRATION2 = 27    # Right vibration motor
+OBJECT_BUTTON = 18 # Button ONLY for object detection (camera functions)
 
 
-def enhance_text_for_speech(text):
-    """
-    Advanced text preprocessing for crystal clear pronunciation
-    """
-    # Step 1: Convert numbers to words for better pronunciation
-    number_words = {
-        '0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four',
-        '5': 'five', '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine',
-        '10': 'ten', '11': 'eleven', '12': 'twelve', '13': 'thirteen',
-        '14': 'fourteen', '15': 'fifteen', '16': 'sixteen', '17': 'seventeen',
-        '18': 'eighteen', '19': 'nineteen', '20': 'twenty', '30': 'thirty',
-        '40': 'forty', '50': 'fifty', '60': 'sixty', '70': 'seventy',
-        '80': 'eighty', '90': 'ninety', '100': 'one hundred'
-    }
-    
-    # Replace exact number matches
-    for num, word in number_words.items():
-        text = re.sub(r'\b' + num + r'\b', word, text)
-    
-    # Handle two-digit numbers not in dictionary
-    def replace_two_digit(match):
-        num = int(match.group())
-        if num in number_words:
-            return number_words[str(num)]
-        elif 21 <= num <= 99:
-            tens = (num // 10) * 10
-            ones = num % 10
-            if ones == 0:
-                return number_words[str(tens)]
-            else:
-                return f"{number_words[str(tens)]} {number_words[str(ones)]}"
-        return match.group()
-    
-    text = re.sub(r'\b\d{2}\b', replace_two_digit, text)
-    
-    # Step 2: Phonetic replacements for crystal clear pronunciation
-    phonetic_replacements = {
-        # Technical terms
-        'centimeters': 'sen-ti-mee-ters',
-        'centimeter': 'sen-ti-mee-ter',
-        'cm': 'sen-ti-mee-ters',
-        'millimeters': 'mil-li-mee-ters',
-        'millimeter': 'mil-li-mee-ter',
-        'mm': 'mil-li-mee-ters',
-        
-        # System words
-        'obstacle': 'ob-sta-cul',
-        'obstacles': 'ob-sta-culs',
-        'detection': 'dee-tek-shun',
-        'activated': 'ak-ti-vay-ted',
-        'enabled': 'en-ay-buld',
-        'disabled': 'dis-ay-buld',
-        'system': 'sis-tem',
-        'warning': 'war-ning',
-        'shutting': 'shut-ting',
-        
-        # Direction and distance words
-        'ahead': 'ah-hed',
-        'detected': 'dee-tek-ted',
-        'very': 'vair-ee',
-        'close': 'klohz',
-        'distance': 'dis-tans',
-        
-        # Common mispronunciations
-        'EyeKnow': 'Eye-Know',
-        'at': 'at',  # Ensure clear pronunciation
-        'the': 'thuh',
-        'and': 'and'
-    }
-    
-    # Apply phonetic replacements (case insensitive)
-    enhanced_text = text
-    for word, replacement in phonetic_replacements.items():
-        enhanced_text = re.sub(r'\b' + re.escape(word) + r'\b', replacement, enhanced_text, flags=re.IGNORECASE)
-    
-    # Step 3: Add natural pauses for rhythm and clarity
-    enhanced_text = enhanced_text.replace('!', '. ')  # Convert exclamations to periods with pause
-    enhanced_text = enhanced_text.replace(',', ' .. ')  # Add pause for commas
-    enhanced_text = enhanced_text.replace('.', ' ... ')  # Longer pause for periods
-    enhanced_text = enhanced_text.replace('at', ', at,')  # Pause around 'at' for numbers
-    
-    # Step 4: Ensure proper spacing
-    enhanced_text = re.sub(r'\s+', ' ', enhanced_text)  # Remove extra spaces
-    enhanced_text = enhanced_text.strip()
-    
-    return enhanced_text
-
-
-def speak_with_crystal_clarity(text):
-    """
-    Use espeak with optimized parameters for crystal clear speech
-    """
-    try:
-        # Enhance the text first
-        clear_text = enhance_text_for_speech(text)
-        
-        print(f"Speaking: {clear_text}")  # Debug output
-        
-        # Crystal clear espeak parameters:
-        # -v en+f4: English female voice variant 4 (clearest)
-        # -s 110: Optimal speed for clarity (not too fast, not too slow)
-        # -a 200: Maximum amplitude for clear volume
-        # -g 15: Longer gaps between words for clarity
-        # -p 45: Slightly lower pitch for smoother sound
-        # -k 20: Capital letter emphasis
-        # --punct: Pronounce punctuation (for pauses)
-        
-        result = subprocess.run([
-            'espeak',
-            '-v', 'en+f4',     # Clear female voice
-            '-s', '110',       # Optimal speaking speed
-            '-a', '200',       # Full volume
-            '-g', '15',        # Word gap for clarity
-            '-p', '45',        # Smooth pitch
-            '-k', '20',        # Capital emphasis
-            '--punct=...',     # Pronounce pauses
-            clear_text
-        ], capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            # Fallback to simpler espeak if advanced options fail
-            subprocess.run([
-                'espeak',
-                '-v', 'en+f3',
-                '-s', '120',
-                '-a', '180',
-                clear_text
-            ], check=True)
-            
-    except FileNotFoundError:
-        print("espeak not found. Installing espeak is recommended for best voice quality.")
-        print("Run: sudo apt install espeak espeak-data")
-        # Fallback to basic speech
-        speak_basic_fallback(text)
-    except Exception as e:
-        print(f"Speech error: {e}")
-        speak_basic_fallback(text)
-
-
-def speak_basic_fallback(text):
-    """Fallback speech method if espeak fails"""
-    try:
-        import pyttsx3
-        engine = pyttsx3.init()
-        
-        # Get voices and try to use a female voice
-        voices = engine.getProperty('voices')
-        if len(voices) > 1:
-            engine.setProperty('voice', voices[1].id)
-        
-        # Optimize for clarity
-        engine.setProperty('rate', 100)  # Very slow for maximum clarity
-        engine.setProperty('volume', 1.0)
-        
-        # Use enhanced text
-        clear_text = enhance_text_for_speech(text)
-        engine.say(clear_text)
-        engine.runAndWait()
-        
-    except Exception as e:
-        print(f"Fallback speech failed: {e}")
-
-
-# Audio queue system for smooth operation
-audio_queue = queue.Queue()
-audio_thread_running = True
-
-
-def audio_worker():
-    """Background thread for crystal clear audio delivery"""
-    while audio_thread_running:
-        try:
-            text = audio_queue.get(timeout=1)
-            if text:
-                speak_with_crystal_clarity(text)
-            audio_queue.task_done()
-        except queue.Empty:
-            continue
-        except Exception as e:
-            print(f"Audio worker error: {e}")
-
-
-# Start audio worker thread
-audio_thread = threading.Thread(target=audio_worker, daemon=True)
-audio_thread.start()
-
-
-def speak_async(text):
-    """Add text to speech queue"""
-    try:
-        audio_queue.put(text, block=False)
-    except queue.Full:
-        print("Audio queue full - skipping message")
-
-
-# GPIO Pin Assignments
-TRIG = 23
-ECHO = 24
-LED = 17
-VIBRATION1 = 22
-VIBRATION2 = 27
-SWITCH = 4
-TOGGLE_BUTTON = 18
-
-
-# GPIO Setup
+# Configure GPIO pins
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(TRIG, GPIO.OUT)
 GPIO.setup(ECHO, GPIO.IN)
 GPIO.setup(LED, GPIO.OUT)
 GPIO.setup(VIBRATION1, GPIO.OUT)
 GPIO.setup(VIBRATION2, GPIO.OUT)
-GPIO.setup(SWITCH, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(TOGGLE_BUTTON, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(OBJECT_BUTTON, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
 
-def get_distance():
-    """Measure distance using ultrasonic sensor"""
-    GPIO.output(TRIG, True)
-    time.sleep(0.00001)
-    GPIO.output(TRIG, False)
-
-
-    pulse_start = time.time()
-    pulse_end = time.time()
-
-
-    while GPIO.input(ECHO) == 0:
-        pulse_start = time.time()
-    while GPIO.input(ECHO) == 1:
-        pulse_end = time.time()
-
-
-    pulse_duration = pulse_end - pulse_start
-    distance = pulse_duration * 17150
-    return round(distance, 2)
-
-
-# Initialize Pi Camera
+# Initialize camera
 picam2 = Picamera2()
-config = picam2.create_preview_configuration(
-    main={"format": "XRGB8888", "size": (1260, 700)},
-    transform=Transform(hflip=1)
-)
+config = picam2.create_preview_configuration(main={"format": "XRGB8888", "size": (640, 480)})
 picam2.configure(config)
 picam2.start()
 
 
-print("EyeKnow system with crystal clear voice starting...")
-# Test the enhanced voice
-speak_async("EyeKnow system activated")
+# Initialize YOLO model
+print("Loading YOLO model...")
+model = YOLO('yolov8n.pt')  # Downloads automatically on first run
+print("YOLO model loaded successfully!")
 
 
-# System state variables
-last_alert_time = 0
-last_ultrasonic_check = 0
-ultrasonic_check_interval = 0.2
-audio_alert_interval = 5.0
-obstacle_detection_enabled = True
-last_button_press = 0
-button_debounce = 0.5
+# System variables - SIMPLIFIED
+last_speech_time = 0
+
+# Button control variables - IMMEDIATE EXECUTION
+last_button_state = GPIO.LOW
+button_debounce = 0.3  # 300ms debounce
 
 
-def format_distance_speech(distance):
-    """Format distance announcements for maximum clarity"""
-    distance_int = int(distance)
+def speak(text):
+    """Simple text-to-speech function"""
+    try:
+        subprocess.run(['espeak', text], check=True)
+    except:
+        print(f"Speech: {text}")  # Fallback if espeak not available
+
+
+def get_distance():
+    """Measure distance using ultrasonic sensor"""
+    try:
+        # Send trigger pulse
+        GPIO.output(TRIG, True)
+        time.sleep(0.00001)
+        GPIO.output(TRIG, False)
+        
+        # Measure echo time
+        pulse_start = time.time()
+        pulse_end = time.time()
+        
+        # Wait for echo start
+        timeout = time.time() + 0.5  # 0.5 second timeout
+        while GPIO.input(ECHO) == 0 and time.time() < timeout:
+            pulse_start = time.time()
+        
+        # Wait for echo end
+        timeout = time.time() + 0.5  # 0.5 second timeout
+        while GPIO.input(ECHO) == 1 and time.time() < timeout:
+            pulse_end = time.time()
+        
+        # Calculate distance
+        pulse_duration = pulse_end - pulse_start
+        distance = pulse_duration * 17150  # Convert to cm
+        return round(distance, 2)
+    except:
+        return 999  # Return max distance if error
+
+
+def detect_obstacles_position(frame):
+    """Detect obstacles and their positions using YOLO"""
+    # Run YOLO detection with lower confidence for better detection
+    results = model(frame, conf=0.25, verbose=False)
     
-    if distance <= 10:
-        return f"Warning! Very close obstacle at {distance_int} centimeters"
-    elif distance <= 30:
-        return f"Close obstacle detected at {distance_int} centimeters"
+    frame_width = frame.shape[1]
+    left_boundary = frame_width // 3
+    right_boundary = 2 * frame_width // 3
+    
+    detected_positions = []
+    
+    for result in results:
+        if result.boxes is not None:
+            for box in result.boxes:
+                # Get bounding box coordinates
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+                
+                # Calculate center of detected object
+                object_center_x = (x1 + x2) // 2
+                
+                # Determine position
+                if object_center_x < left_boundary:
+                    position = "left"
+                elif object_center_x > right_boundary:
+                    position = "right"
+                else:
+                    position = "front"
+                
+                # Get object class name
+                class_id = int(box.cls[0])
+                class_name = model.names[class_id]
+                confidence = float(box.conf[0])
+                
+                detected_positions.append({
+                    'position': position,
+                    'class': class_name,
+                    'confidence': confidence,
+                    'center_x': object_center_x
+                })
+    
+    return detected_positions
+
+
+def detect_objects_for_identification(frame):
+    """Detect objects for identification mode - SINGLE CAPTURE"""
+    results = model(frame, conf=0.3, verbose=False)
+    
+    detected_objects = []
+    
+    for result in results:
+        if result.boxes is not None:
+            for box in result.boxes:
+                # Get object class name
+                class_id = int(box.cls[0])
+                class_name = model.names[class_id]
+                confidence = float(box.conf[0])
+                
+                detected_objects.append({
+                    'class': class_name,
+                    'confidence': confidence
+                })
+    
+    return detected_objects
+
+
+def set_positional_alerts(vibration_on, position, led_on=False):
+    """Control positional vibration alerts and LED based on obstacle position"""
+    if vibration_on and position:
+        # LED indication for obstacle detected
+        GPIO.output(LED, GPIO.HIGH if led_on else GPIO.LOW)
+        
+        if position == "left":
+            GPIO.output(VIBRATION1, GPIO.HIGH)
+            GPIO.output(VIBRATION2, GPIO.LOW)
+        elif position == "right":
+            GPIO.output(VIBRATION1, GPIO.LOW)
+            GPIO.output(VIBRATION2, GPIO.HIGH)
+        elif position == "front":
+            GPIO.output(VIBRATION1, GPIO.HIGH)
+            GPIO.output(VIBRATION2, GPIO.HIGH)
+        else:
+            GPIO.output(VIBRATION1, GPIO.LOW)
+            GPIO.output(VIBRATION2, GPIO.LOW)
     else:
-        return f"Obstacle ahead at {distance_int} centimeters"
+        GPIO.output(LED, GPIO.LOW)
+        GPIO.output(VIBRATION1, GPIO.LOW)
+        GPIO.output(VIBRATION2, GPIO.LOW)
+
+
+def get_warning_message(distance, positions):
+    """Get appropriate warning message based on distance and positions"""
+    if distance <= 100:
+        distance_level = "Very close obstacle"
+    elif distance <= 200:
+        distance_level = "Close obstacle"
+    elif distance <= 300:
+        distance_level = "Far obstacle"
+    else:
+        return None, None
+    
+    # Get primary position
+    if not positions:
+        # If no camera detection, use front as default
+        return f"{distance_level} at front", "front"
+    
+    # Use first detected position
+    main_position = positions[0]['position']
+    return f"{distance_level} at {main_position}", main_position
+
+
+def get_primary_position(positions):
+    """Get the primary position from detected objects"""
+    if not positions:
+        return None
+    
+    # Count positions
+    left_count = sum(1 for pos in positions if pos['position'] == 'left')
+    front_count = sum(1 for pos in positions if pos['position'] == 'front')
+    right_count = sum(1 for pos in positions if pos['position'] == 'right')
+    
+    # Return the side with most detections (front takes priority if tied)
+    if front_count >= left_count and front_count >= right_count:
+        return 'front'
+    elif left_count > right_count:
+        return 'left'
+    else:
+        return 'right'
+
+
+def execute_object_detection_immediately(frame):
+    """IMMEDIATE object detection execution when button is pressed"""
+    print("🔍 BUTTON PRESSED! Executing object detection...")
+    
+    # Turn off all obstacle alerts immediately
+    set_positional_alerts(False, None)
+    
+    # LED blink pattern for object detection
+    speak("Object detection mode")
+    for i in range(3):
+        GPIO.output(LED, GPIO.HIGH)
+        time.sleep(0.1)
+        GPIO.output(LED, GPIO.LOW)
+        time.sleep(0.1)
+    
+    # Detect objects
+    detected_objects = detect_objects_for_identification(frame)
+    
+    if detected_objects:
+        # Get unique objects with highest confidence
+        unique_objects = {}
+        for obj in detected_objects:
+            class_name = obj['class']
+            if class_name not in unique_objects or obj['confidence'] > unique_objects[class_name]['confidence']:
+                unique_objects[class_name] = obj
+        
+        # Announce detected objects
+        for class_name, obj in unique_objects.items():
+            message = f"Detected {class_name}"
+            speak(message)
+            print(f"✅ Object detected: {message} (confidence: {obj['confidence']:.2f})")
+            time.sleep(0.5)  # Brief pause between announcements
+        
+        # Summary if multiple objects
+        if len(unique_objects) > 1:
+            speak(f"Total {len(unique_objects)} objects detected")
+    else:
+        # NO OBJECTS DETECTED
+        speak("No objects detected")
+        print("❌ No objects detected in frame")
+    
+    # Signal processing complete
+    speak("Returning to obstacle detection")
+    print("🔙 Object detection complete, returning to obstacle mode")
+
+
+print("EyeKnow system starting...")
+print("OBJECT_BUTTON (pin 18) = Object detection trigger")
+print("  - DEFAULT: Obstacle detection mode (continuous)")  
+print("  - BUTTON PRESS: Immediate object detection, then back to obstacle mode")
+print("Ultrasonic sensor (pins 23/24) = Distance measurement")
+print("VIBRATION1 (pin 22) = LEFT motor")
+print("VIBRATION2 (pin 27) = RIGHT motor")
+print("LED (pin 17) = Status indicator")
+
+# Initial status announcement
+speak("EyeKnow system activated. Obstacle detection mode active")
+print("🚧 SYSTEM READY: OBSTACLE MODE active")
 
 
 try:
     while True:
-        frame = picam2.capture_array()
         current_time = time.time()
         
-        # Toggle button handling
-        if GPIO.input(TOGGLE_BUTTON) == GPIO.LOW:
-            if current_time - last_button_press > button_debounce:
-                obstacle_detection_enabled = not obstacle_detection_enabled
-                last_button_press = current_time
-                
-                if obstacle_detection_enabled:
-                    speak_async("Obstacle detection enabled")
-                    print("Obstacle detection: ENABLED")
-                else:
-                    speak_async("Obstacle detection disabled")
-                    print("Obstacle detection: DISABLED")
-                    GPIO.output(LED, GPIO.LOW)
-                    GPIO.output(VIBRATION1, GPIO.LOW)
-                    GPIO.output(VIBRATION2, GPIO.LOW)
+        # Get camera frame
+        frame = picam2.capture_array()
+        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         
-        # Continuous obstacle detection
-        if obstacle_detection_enabled:
-            if current_time - last_ultrasonic_check >= ultrasonic_check_interval:
-                distance = get_distance()
-                last_ultrasonic_check = current_time
+        # BUTTON DETECTION - IMMEDIATE EXECUTION
+        current_button_state = GPIO.input(OBJECT_BUTTON)
+        
+        # Detect button press (rising edge) and EXECUTE IMMEDIATELY
+        if current_button_state == GPIO.HIGH and last_button_state == GPIO.LOW:
+            time.sleep(button_debounce)  # Debounce delay
+            
+            # Check if button is still pressed after debounce
+            if GPIO.input(OBJECT_BUTTON) == GPIO.HIGH:
+                # EXECUTE OBJECT DETECTION IMMEDIATELY
+                execute_object_detection_immediately(frame_bgr)
                 
-                if distance > 100:
-                    print("MAX REACH: 100cm - No obstacles detected")
-                    GPIO.output(LED, GPIO.LOW)
-                    GPIO.output(VIBRATION1, GPIO.LOW)
-                    GPIO.output(VIBRATION2, GPIO.LOW)
-                elif distance <= 50:
-                    print(f"Distance: {distance} cm — ALERT")
-                    GPIO.output(LED, GPIO.HIGH)
-                    GPIO.output(VIBRATION1, GPIO.HIGH)
-                    GPIO.output(VIBRATION2, GPIO.HIGH)
-                    
-                    # Crystal clear audio alert every 5 seconds
-                    if current_time - last_alert_time >= audio_alert_interval:
-                        speech_text = format_distance_speech(distance)
-                        speak_async(speech_text)
-                        last_alert_time = current_time
-                        
-                else:
-                    print(f"Distance: {distance} cm - Safe")
-                    GPIO.output(LED, GPIO.LOW)
-                    GPIO.output(VIBRATION1, GPIO.LOW)
-                    GPIO.output(VIBRATION2, GPIO.LOW)
+                # Wait for button release to prevent multiple triggers
+                print("Waiting for button release...")
+                while GPIO.input(OBJECT_BUTTON) == GPIO.HIGH:
+                    time.sleep(0.1)
+                print("Button released - Ready for next press")
+        
+        last_button_state = current_button_state
+        
+        # OBSTACLE DETECTION MODE (Default) - CONTINUOUS
+        print("🚧 OBSTACLE MODE: Checking for obstacles...", end='\r')
+        
+        # Get distance from ultrasonic sensor
+        distance = get_distance()
+        
+        # Detect objects and their positions for obstacle avoidance
+        detected_positions = detect_obstacles_position(frame_bgr)
+        
+        if distance >= 301:
+            # Safe distance - no alerts
+            print(f"Distance: {distance} cm - Safe", end='\r')
+            set_positional_alerts(False, None)
         else:
-            GPIO.output(LED, GPIO.LOW)
-            GPIO.output(VIBRATION1, GPIO.LOW)
-            GPIO.output(VIBRATION2, GPIO.LOW)
-
-
-        time.sleep(0.05)
+            # Obstacle detected - get warning message and position
+            warning_result = get_warning_message(distance, detected_positions)
+            if warning_result:
+                warning_message, obstacle_position = warning_result
+            else:
+                warning_message, obstacle_position = None, None
+            
+            # Console output with position info
+            position_info = ""
+            if detected_positions:
+                primary_pos = get_primary_position(detected_positions)
+                position_info = f" (Camera: {primary_pos})"
+            
+            if distance <= 100:
+                print(f"Distance: {distance} cm - VERY CLOSE WARNING{position_info}")
+                set_positional_alerts(True, obstacle_position, led_on=True)
+            elif distance <= 200:
+                print(f"Distance: {distance} cm - CLOSE WARNING{position_info}")
+                set_positional_alerts(True, obstacle_position, led_on=True)
+            else:  # 201-300
+                print(f"Distance: {distance} cm - FAR WARNING{position_info}")
+                set_positional_alerts(True, obstacle_position, led_on=False)
+            
+            # Speak warning every 5 seconds
+            if current_time - last_speech_time >= 5.0:
+                if warning_message:
+                    speak(warning_message)
+                    last_speech_time = current_time
+        
+        time.sleep(0.1)  # Responsive loop
 
 
 except KeyboardInterrupt:
-    print("\nProgram stopped by user.")
-    speak_async("EyeKnow system shutting down")
-    time.sleep(3)
-    audio_thread_running = False
+    print("\nStopping system...")
+    speak("EyeKnow system shutting down")
 
 
 finally:
+    # Cleanup
     picam2.stop()
     GPIO.cleanup()
-    print("System cleanup completed.")
+    print("System stopped.")
