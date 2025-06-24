@@ -9,7 +9,7 @@ print("📊 Optimized for 1,400 image dataset")
 model = YOLO('yolov8n.pt')
 
 # Use your existing dataset but with speed optimizations
-dataset_path = "/home/sia2/EyeKnow/roboflow_dataset/eyeknow-11/data.yaml"
+dataset_path = "/home/sia2/EyeKnow/roboflow_dataset/data.yaml"
 
 # Check dataset exists
 if not os.path.exists(dataset_path):
